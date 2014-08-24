@@ -1,32 +1,18 @@
 #!flask/bin/python
 # -*- coding: utf-8 -*-
 
-
-from flask import Flask, jsonify, request, make_response
+from flask import Flask, jsonify, request, make_response, abort
 from flask.ext.mongoengine import MongoEngine
 from flask.ext.httpauth import HTTPBasicAuth
 from mongoengine import *
-import pymongo, os, json
+import pymongo, os, json, uuid, hashlib
 
+app = Flask(__name__)
 auth = HTTPBasicAuth()
 
 
-# Here we can check a user database
-@auth.get_password
-def get_password(username):
-    if username == 'tronza':
-        return 'tronza'
-
-    return None
-
-
-# Recordar cambiar el código de error de 403 a 401 (cuando el servicio sea consumido por apps)
-@auth.error_handler
-def unauthorized():
-    return make_response(jsonify({ 'error': 'Unauthorized access' } ), 403) 
-
-
-app = Flask(__name__)
+# Nos conectamos a la base de datos y 
+# creamos los documentos que utilizaremos 
 
 connect('tasks')
 
@@ -36,16 +22,33 @@ class Task(Document):
     description = StringField(max_length = 50)
     done =  BooleanField(default = False)
 
-# Task.objects.delete()
+class User(Document):
+    name = StringField(required = True, unique=True)
+    password = StringField(required = True)
 
-# nueva_tarea = Task(id_num = 1)
-# nueva_tarea.title = u'Comprar cosas'
-# nueva_tarea.description = u'Milk, Cheese, Pizza, Fruit, Tylenol'
-# nueva_tarea.save()
 
-# db.task.remove()
-# db.task.save(tasks[0])
-# db.task.save(tasks[1])
+
+# encriptamos la contraseña que está ingresando, para compararla con la del usuario
+@auth.verify_password
+def verify_password(username, password):
+    try:
+        user = User.objects.get(name = username)
+
+        resp = check_password(user.password, password)
+
+    except Exception, e:
+        return False
+
+    return resp
+
+
+
+# Recordar cambiar el código de error de 403 a 401 (cuando el servicio sea consumido por apps)
+@auth.error_handler
+def unauthorized():
+    return make_response(jsonify({ 'error': 'Unauthorized access' } ), 403) 
+
+
 
 @app.route('/api/v1/tasks', methods = ['GET'])
 @auth.login_required
@@ -107,6 +110,54 @@ def update_task(task_id):
 
 
     return jsonify({'tareas': False })
+
+
+
+@app.route('/api/v1/users', methods = ['POST'])
+def create_user():
+
+    print request.json
+    if not request.json or not 'name' in request.json:
+        abort(400)
+
+    new_user = User()
+    new_user.name = request.json['name']
+    new_user.password = hash_password(request.json['password'])
+
+    # Controlamos error en caso de que se inserte un usuario que ya existe
+    try:
+        new_user.save()
+    except Exception, e:
+        print e
+        abort(400)
+    
+    salida = []
+    usuarios = User.objects
+    for u in usuarios:
+        item = {
+            "name" : u.name,
+            "password" : u.password
+        }
+        salida.append(item)
+
+    return jsonify({'users': salida }), 201
+
+
+
+####### Funciones para manipulas contraseñas #############
+
+def hash_password(password, new_salt = False):
+    # uuid is used to generate a random number
+    salt = uuid.uuid4().hex
+    if new_salt:
+        salt = new_salt
+
+    return hashlib.sha256(salt.encode() + password.encode()).hexdigest() + ':' + salt
+    
+def check_password(hashed_password, user_password):
+    password, salt = hashed_password.split(':')
+    return password == hashlib.sha256(salt.encode() + user_password.encode()).hexdigest()
+ 
 
 if __name__ == '__main__':
     app.run(debug = True)
