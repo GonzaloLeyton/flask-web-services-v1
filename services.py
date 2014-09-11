@@ -51,7 +51,7 @@ def unauthorized():
 
 
 @app.route('/api/v1/tasks', methods = ['GET'])
-@auth.login_required
+# @auth.login_required
 def get_tasks():
     salida = []
     tarea = Task.objects
